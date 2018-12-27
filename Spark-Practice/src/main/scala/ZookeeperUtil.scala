@@ -1,11 +1,34 @@
 import kafka.common.TopicAndPartition
-import org.apache.spark.streaming.kafka.KafkaCluster
+import org.apache.spark.streaming.dstream.InputDStream
+import org.apache.spark.streaming.kafka.{HasOffsetRanges, KafkaCluster, OffsetRange}
 import org.apache.spark.streaming.kafka.KafkaCluster.Err
 
 import scala.collection.mutable
 
 object ZookeeperUtil {
-
+  /**
+    * 手动提交offset
+    * @param onlineDStream 消费者流
+    * @param cluster  kafka集群
+    * @param group 消费者组
+    */
+  def writeOffsetToZookeeper(onlineDStream: InputDStream[String], cluster: KafkaCluster, group: String): Unit ={
+    onlineDStream.foreachRDD{
+      rdd =>
+        //获取每个rdd中的offset信息
+        val offsetList: Array[OffsetRange] = rdd.asInstanceOf[HasOffsetRanges].offsetRanges
+        //遍历每一个offset信息，更新并保存在zookeeper中
+        for (offsetRange <- offsetList) {
+          val topicAndPartition = TopicAndPartition(offsetRange.topic,offsetRange.partition)
+          val ack: Either[Err, Map[TopicAndPartition, Short]] = cluster.setConsumerOffsets(group,Map((topicAndPartition,offsetRange.untilOffset)))
+          if(ack.isLeft){
+            println(s"Error updating the offset to Kafka cluster: ${ack.left.get}")
+          }else{
+            println(s"update the offset to Kafka cluster: ${offsetRange.untilOffset} successfully")
+          }
+        }
+    }
+  }
   /**
     * 手动提交offset
     * @param cluster 集群id
